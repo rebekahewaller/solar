@@ -8,6 +8,9 @@ Created on Tue Aug 13 16:30:16 2019
 ### Program for controlling BK8542B DC Electronic Load for IV curve measurement of solar panel ###
 
 import serial, time, csv, os
+
+d_log = None
+
 #import bk8500b #getting Name Error whenever attempting to use function from library
 
 # Input data: serial communication, number of samples, PV data
@@ -168,7 +171,7 @@ def readCVVoltage(serial):
     volt_in_CV = (resp[3] + (resp[4] << 8) + (resp[5] << 16) + (resp[6] << 24)) / 1000.00
     return volt_in_CV
     
-def curve(voc,serial):
+def curve(voc, log_file, serial):
     step_count = 0
     setMode(1,serial)
     readMode(serial)
@@ -185,11 +188,11 @@ def curve(voc,serial):
             readCVVoltage(serial)
             curve_pt = readInputLevels(serial)
             print(curve_pt)
+            write_data(log_file, [time.time(),  curve_pt[0], curve_pt[1], curve_pt[2]])
             step_count += 1
             time.sleep(1)
         else:
             return None
-        # output curve pt to file
         
 # Short circuit proof
         
@@ -215,35 +218,36 @@ def setLocalMode(serial):
     ser.close()
     
 # Save data: current, voltage, and power
-    
-class data_logging:
 
-    def __init__(self, header_list, log_file_postfix=''):
-        
-        self.log_file = 'data_log_' + log_file_postfix + '.csv'
-        self.log_file_header = header_list
-        
-        if os.path.exists(self.log_file) is not True:
-            with open(self.log_file, mode='a') as the_file:
-                writer = csv.writer(the_file, dialect='excel')
-                writer.writerow(header_list)
-                
-    def write_data(self, data_list, debug=True):
-        
-        if debug is True:
-            print(data_list)
-            
-        with open(self.log_file, mode='a') as the_file:
+def data_file(header_list, log_file_postfix=''):
+    
+    log_file = 'data_log_' + log_file_postfix + '.csv'
+    log_file_header = header_list
+    
+    if os.path.exists(log_file) is not True:
+        with open(log_file, mode='a') as the_file:
             writer = csv.writer(the_file, dialect='excel')
-            writer.writerow(data_list)
+            writer.writerow(header_list)
             
-def reading_load(logging=True, serial):
-    reading = readInputLevels(serial) # Read data from DC load
-    time_now = time.time() # Get current time
-    data_list = [time_now, reading[0], reading[1], reading[2]] # Build data_list
-    if logging is True: # Log data
-        data_logging.write_data(data_list, debug=True)
+def write_data(log_file, data_list):
         
-    return data_list
+    with open(log_file, mode='a') as the_file:
+        writer = csv.writer(the_file, dialect='excel')
+        writer.writerow(data_list)
+
+
+def main():
+    
+    print('Setup DC load and logging')
+    init_load()
+    data_file(['Time' , 'volts', 'current', 'power'], log_file_postfix='LOAD')
+    
+    print('Begin IV curve measurement')
+    
+    opencircuit()
+    curve()
+    shortcircuit()
+    
+    
     
     
