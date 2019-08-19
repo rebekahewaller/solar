@@ -7,19 +7,20 @@ Created on Tue Aug 13 16:30:16 2019
 
 ### Program for controlling BK8542B DC Electronic Load for IV curve measurement of solar panel ###
 
-import serial, time
+import serial, time, csv, os
 #import bk8500b #getting Name Error whenever attempting to use function from library
 
 # Input data: serial communication, number of samples, PV data
     
 # Serial communication configuration (PC-load) and start
 
-ser = serial.Serial()
-ser.baudrate = 9600
-ser.port = "COM3"
-ser.timeout = 1
-ser.open()
-ser.flush
+def init_load():
+    ser = serial.Serial()
+    ser.baudrate = 9600
+    ser.port = "COM3"
+    ser.timeout = 1
+    ser.open()
+    ser.flush
 
 def csum(command):  
     checksum = 0
@@ -56,7 +57,7 @@ def command(command, serial):
         printCmd(command)
             
         print("Reponse Received:\t",end=' ')     
-        bk8500b.printCmd(resp)
+        printCmd(resp)
     else:
         return resp
 
@@ -121,25 +122,30 @@ def readCCCurrent(serial):
     cmd = [0] * 26
     cmd[2] = 0x2B
     resp = command(cmd, serial)
-    curr_in = resp[3] + (resp[4] << 8) + (resp[5] << 16) + (resp[6] << 24)
-    return curr_in/10000.00
+    curr_in_CC = (resp[3] + (resp[4] << 8) + (resp[5] << 16) + (resp[6] << 24)) / 10000.00
+    return curr_in_CC
 
 def readInputLevels(serial):
     print("Read input voltage, current, power and relative state")
     cmd = [0] * 26 # byte 3 to 6 = voltage (1 mV), byte 7 to 10 = current (0.1 mA)
     cmd[2] = 0x5F # byte 11 to 14 = power (1 mW)
     resp = command(cmd, serial)
-    volt_in = resp[3] + (resp[4] << 8) + (resp[5] << 16) + (resp[6] << 24)
-    curr_in = resp[7] + (resp[8] << 8) + (resp[9] << 16) + (resp[10] << 24)
-    pow_in = resp[11] + (resp[12] << 8) + (resp[13] << 16) + (resp[14] << 24)
-    return volt_in/1000.00, curr_in/10000.00, pow_in/1000.00
+    volt_in = (resp[3] + (resp[4] << 8) + (resp[5] << 16) + (resp[6] << 24)) / 1000.00
+    curr_in = (resp[7] + (resp[8] << 8) + (resp[9] << 16) + (resp[10] << 24)) / 10000.00
+    power_in = (resp[11] + (resp[12] << 8) + (resp[13] << 16) + (resp[14] << 24)) / 1000.00
+    op_state = hex(resp[15])
+    demand_state = hex((resp[16] + resp[17] << 8))
+    return (volt_in, curr_in, power_in, op_state, demand_state)
         
 def opencircuit(serial):
     setMode(0,serial) # Set operation mode to CC
     readMode(serial) # Read operation mode
     setCCCurrent(0,serial) # Set CC mode current to 0 amps
+    time.sleep(1)
     readCCCurrent(serial)
-    readInputLevels(serial)
+    reading = readInputLevels(serial)
+    voc = reading[0]
+    return voc
     
 # Intermediate steps: sampling between open circuit voltage and short circuit current
 
@@ -158,16 +164,45 @@ def readCVVoltage(serial):
     print("Read CV mode voltage value")
     cmd = [0] * 26
     cmd[2] = 0x2D
-    command(cmd, serial)
+    resp = command(cmd, serial)
+    volt_in_CV = (resp[3] + (resp[4] << 8) + (resp[5] << 16) + (resp[6] << 24)) / 1000.00
+    return volt_in_CV
     
-def curve(opv_voc,serial):
-    steps = 0
+def curve(voc,serial):
+    step_count = 0
     setMode(1,serial)
     readMode(serial)
+    time.sleep(1)
+    setCVVoltage(voc,serial)
+    readCVVoltage(serial)
+    time.sleep(1)
+    for step_count in range(100):
+        reading = readInputLevels(serial)
+        volt_step = reading[0]
+        new_volt_step = volt_step - 0.1
+        if new_volt_step > 0:
+            setCVVoltage(new_volt_step,serial)
+            readCVVoltage(serial)
+            curve_pt = readInputLevels(serial)
+            print(curve_pt)
+            step_count += 1
+            time.sleep(1)
+        else:
+            return None
+        # output curve pt to file
         
-        
-
 # Short circuit proof
+        
+def shortcircuit(serial):
+    setMode(1,serial) # Set operation mode to CV
+    readMode(serial) # Read operation mode
+    time.sleep(1)
+    setCVVoltage(0.1,serial) # Set CV mode voltage to 0.1 volts (nearest value to 0 volts)
+    time.sleep(1)
+    readCVVoltage(serial)
+    reading = readInputLevels(serial)
+    jsc = reading[1]
+    return jsc
 
 # Set local control mode ON
 
@@ -180,3 +215,35 @@ def setLocalMode(serial):
     ser.close()
     
 # Save data: current, voltage, and power
+    
+class data_logging:
+
+    def __init__(self, header_list, log_file_postfix=''):
+        
+        self.log_file = 'data_log_' + log_file_postfix + '.csv'
+        self.log_file_header = header_list
+        
+        if os.path.exists(self.log_file) is not True:
+            with open(self.log_file, mode='a') as the_file:
+                writer = csv.writer(the_file, dialect='excel')
+                writer.writerow(header_list)
+                
+    def write_data(self, data_list, debug=True):
+        
+        if debug is True:
+            print(data_list)
+            
+        with open(self.log_file, mode='a') as the_file:
+            writer = csv.writer(the_file, dialect='excel')
+            writer.writerow(data_list)
+            
+def reading_load(logging=True, serial):
+    reading = readInputLevels(serial) # Read data from DC load
+    time_now = time.time() # Get current time
+    data_list = [time_now, reading[0], reading[1], reading[2]] # Build data_list
+    if logging is True: # Log data
+        data_logging.write_data(data_list, debug=True)
+        
+    return data_list
+    
+    
