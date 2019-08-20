@@ -24,6 +24,7 @@ def init_load():
     ser.timeout = 1
     ser.open()
     ser.flush
+    return ser
 
 def csum(command):  
     checksum = 0
@@ -94,6 +95,42 @@ def inputOff(serial):
     cmd[2] = 0x21                       
     command(cmd, serial)
     
+# VOn Mode turns on load only if certain voltage is reached
+    
+def setVonMode(serial):
+    print("Set Von mode")
+    cmd = [0] * 26
+    cmd[2] = 0x0E
+    cmd[3] = 0x00 # Von LIVING mode (Latch mode = 0x01)
+    command(cmd, serial)
+
+def readVonMode(serial):
+    print("Read Von mode")
+    cmd = [0] * 26
+    cmd[2] = 0x0F
+    resp = command(cmd, serial)
+    return resp
+
+def setVonPoint(von_volt, serial):
+    print("Set Von point (volts):", von_volt)
+    val = int(von_volt * 1000)
+    cmd = [0] * 26
+    cmd[2] = 0x10
+    cmd[3] = val & 0x00FF
+#    cmd[4] = (val >> 8) & 0xFF
+#    cmd[5] = (val >> 16) & 0xFF
+#    cmd[6] = (val >> 24) & 0xFF
+    command(cmd, serial)
+
+def readVonPoint(serial):
+    print("Read Von point")
+    cmd = [0] * 26
+    cmd[2] = 0x11
+    resp = command(cmd, serial)
+    print(resp)
+#    von_volt = (resp[3] + (resp[4] << 8) + (resp[5] << 16) + (resp[6] << 24)) / 1000.00
+#    return von_volt
+
 # Open circuit proof
 
 def setMode(mode, serial):
@@ -140,14 +177,15 @@ def readInputLevels(serial):
     demand_state = hex((resp[16] + resp[17] << 8))
     return (volt_in, curr_in, power_in, op_state, demand_state)
         
-def opencircuit(serial):
+def opencircuit(opv_sample, log_file, serial):
     setMode(0,serial) # Set operation mode to CC
     readMode(serial) # Read operation mode
     setCCCurrent(0,serial) # Set CC mode current to 0 amps
     time.sleep(1)
     readCCCurrent(serial)
-    reading = readInputLevels(serial)
-    voc = reading[0]
+    oc = readInputLevels(serial)
+    write_data(log_file, [opv_sample, time.time(),  oc[0], oc[1], oc[2]])
+    voc = oc[0]
     return voc
     
 # Intermediate steps: sampling between open circuit voltage and short circuit current
@@ -171,14 +209,14 @@ def readCVVoltage(serial):
     volt_in_CV = (resp[3] + (resp[4] << 8) + (resp[5] << 16) + (resp[6] << 24)) / 1000.00
     return volt_in_CV
     
-def curve(voc, log_file, serial):
+def curve(voc, opv_sample, log_file, serial):
     step_count = 0
     setMode(1,serial)
     readMode(serial)
-    time.sleep(1)
+    time.sleep(0.5)
     setCVVoltage(voc,serial)
     readCVVoltage(serial)
-    time.sleep(1)
+    time.sleep(0.5)
     for step_count in range(100):
         reading = readInputLevels(serial)
         volt_step = reading[0]
@@ -188,23 +226,28 @@ def curve(voc, log_file, serial):
             readCVVoltage(serial)
             curve_pt = readInputLevels(serial)
             print(curve_pt)
-            write_data(log_file, [time.time(),  curve_pt[0], curve_pt[1], curve_pt[2]])
+            write_data(log_file, [opv_sample, time.time(), curve_pt[0], curve_pt[1], curve_pt[2]])
             step_count += 1
-            time.sleep(1)
+            time.sleep(0.5)
         else:
-            return None
+            step_count = 101
+        return
+            # need error statement, 'Parameter Incorrect' when None type is fed to function
+            
+    
         
 # Short circuit proof
         
-def shortcircuit(serial):
+def shortcircuit(opv_sample, log_file, serial):
     setMode(1,serial) # Set operation mode to CV
     readMode(serial) # Read operation mode
     time.sleep(1)
     setCVVoltage(0.1,serial) # Set CV mode voltage to 0.1 volts (nearest value to 0 volts)
     time.sleep(1)
     readCVVoltage(serial)
-    reading = readInputLevels(serial)
-    jsc = reading[1]
+    sc = readInputLevels(serial)
+    write_data(log_file, [opv_sample, time.time(),  sc[0], sc[1], sc[2]])
+    jsc = sc[1]
     return jsc
 
 # Set local control mode ON
@@ -215,7 +258,7 @@ def setLocalMode(serial):
     cmd[3] = 0
     command(cmd, serial)
     print("Goodbye")
-    ser.close()
+    serial.close()
     
 # Save data: current, voltage, and power
 
@@ -225,28 +268,34 @@ def data_file(header_list, log_file_postfix=''):
     log_file_header = header_list
     
     if os.path.exists(log_file) is not True:
-        with open(log_file, mode='a') as the_file:
+        with open(log_file, mode='a',newline='') as the_file:
             writer = csv.writer(the_file, dialect='excel')
             writer.writerow(header_list)
             
 def write_data(log_file, data_list):
         
-    with open(log_file, mode='a') as the_file:
+    with open(log_file, mode='a',newline='') as the_file:
         writer = csv.writer(the_file, dialect='excel')
         writer.writerow(data_list)
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                
+# Main testing function for IV curve measurement
 
-
-def main():
+def sweep(opv_sample, serial):
     
-    print('Setup DC load and logging')
-    init_load()
-    data_file(['Time' , 'volts', 'current', 'power'], log_file_postfix='LOAD')
+#    print('Setup DC load and logging')
+#    init_load()
+#    data_file(['OPV', 'Time' , 'volts', 'current', 'power'], log_file_postfix='LOAD')
     
     print('Begin IV curve measurement')
+#   make each OPV sheet a class and assign voc, mpp, jsc as objects
+    log_file = 'data_log_LOAD.csv'
+    voc = 1.0
     
-    opencircuit()
-    curve()
-    shortcircuit()
+    opencircuit(opv_sample, log_file, serial)
+    time.sleep(1)
+    curve(voc, opv_sample, log_file, serial)
+    time.sleep(1)
+    shortcircuit(opv_sample, log_file, serial)
     
     
     
