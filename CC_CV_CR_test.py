@@ -46,7 +46,7 @@ def command(command, serial):
     resp = serial.read(26)
     if resp[2] == 0x12:
         if resp[3] == 0x80:
-            print('Success')
+#            print('Success')
             return
         elif resp[3] == 0x90:
             raise Exception('Checksum Error')
@@ -97,11 +97,16 @@ def inputOff(serial):
     
 # VOn Mode turns on load only if certain voltage is reached
     
-def setVonMode(serial):
-    print("Set Von mode")
+def setVonMode(mode,serial):
+    print("Set Von mode to:", mode)
     cmd = [0] * 26
     cmd[2] = 0x0E
-    cmd[3] = 0x00 # Von LIVING mode (Latch mode = 0x01)
+    if mode == 'living':
+        cmd[3] = 0x00 #Von LIVING mode
+    elif mode == 'latch':
+        cmd[3] = 0x01 #Von LATCH 
+    else:
+        print("Von mode not specified")
     command(cmd, serial)
 
 def readVonMode(serial):
@@ -117,9 +122,9 @@ def setVonPoint(von_volt, serial):
     cmd = [0] * 26
     cmd[2] = 0x10
     cmd[3] = val & 0x00FF
-#    cmd[4] = (val >> 8) & 0xFF
-#    cmd[5] = (val >> 16) & 0xFF
-#    cmd[6] = (val >> 24) & 0xFF
+    cmd[4] = (val >> 8) & 0xFF
+    cmd[5] = (val >> 16) & 0xFF
+    cmd[6] = (val >> 24) & 0xFF
     command(cmd, serial)
 
 def readVonPoint(serial):
@@ -127,27 +132,26 @@ def readVonPoint(serial):
     cmd = [0] * 26
     cmd[2] = 0x11
     resp = command(cmd, serial)
-    print(resp)
-#    von_volt = (resp[3] + (resp[4] << 8) + (resp[5] << 16) + (resp[6] << 24)) / 1000.00
-#    return von_volt
+    von_volt = (resp[3] + (resp[4] << 8) + (resp[5] << 16) + (resp[6] << 24)) / 1000.00
+    return von_volt
 
 # Open circuit proof
 
 def setMode(mode, serial):
-    print("Set CC/CV/CW/CR operation mode of electronic load.")
+#    print("Set CC/CV/CW/CR operation mode of electronic load.")
     cmd = [0] * 26
     cmd[2] = 0x28
     cmd[3] = mode # CC = 0, CV = 1, CW = 2, CR = 3
     command(cmd, serial)
 
 def readMode(serial):
-    print("Read the operation mode.")
+#    print("Read the operation mode.")
     cmd = [0] * 26
     cmd[2] = 0x29
     command(cmd, serial)
     
 def setCCCurrent(curr, serial):
-    print("Set CC mode current value (amps):", curr)
+#    print("Set CC mode current value (amps):", curr)
     val = int(curr * 10000)
     cmd = [0] * 26
     cmd[2] = 0x2A
@@ -158,7 +162,7 @@ def setCCCurrent(curr, serial):
     command(cmd, serial)
     
 def readCCCurrent(serial):
-    print("Read CC mode current value")
+#    print("Read CC mode current value")
     cmd = [0] * 26
     cmd[2] = 0x2B
     resp = command(cmd, serial)
@@ -166,32 +170,32 @@ def readCCCurrent(serial):
     return curr_in_CC
 
 def readInputLevels(serial):
-    print("Read input voltage, current, power and relative state")
+#    print("Read input voltage, current, power and relative state")
     cmd = [0] * 26 # byte 3 to 6 = voltage (1 mV), byte 7 to 10 = current (0.1 mA)
     cmd[2] = 0x5F # byte 11 to 14 = power (1 mW)
     resp = command(cmd, serial)
     volt_in = (resp[3] + (resp[4] << 8) + (resp[5] << 16) + (resp[6] << 24)) / 1000.00
     curr_in = (resp[7] + (resp[8] << 8) + (resp[9] << 16) + (resp[10] << 24)) / 10000.00
     power_in = (resp[11] + (resp[12] << 8) + (resp[13] << 16) + (resp[14] << 24)) / 1000.00
-    op_state = hex(resp[15])
-    demand_state = hex((resp[16] + resp[17] << 8))
-    return (volt_in, curr_in, power_in, op_state, demand_state)
+#    op_state = hex(resp[15])
+#    demand_state = hex((resp[16] + resp[17] << 8))
+    return (volt_in, curr_in, power_in)
         
 def opencircuit(opv_sample, log_file, serial):
+    print("Open circuit voltage measurement")
     setMode(0,serial) # Set operation mode to CC
-    readMode(serial) # Read operation mode
     setCCCurrent(0,serial) # Set CC mode current to 0 amps
     time.sleep(1)
-    readCCCurrent(serial)
-    oc = readInputLevels(serial)
-    write_data(log_file, [opv_sample, time.time(),  oc[0], oc[1], oc[2]])
-    voc = oc[0]
+    oc = readInputLevels(serial) # Read open circuit levels
+    write_data(log_file, [opv_sample, time.time(),  oc[0], oc[1], oc[2]]) # write data to .csv file
+    voc = oc[0] # open circuit voltage
+    print(voc)
     return voc
     
 # Intermediate steps: sampling between open circuit voltage and short circuit current
 
-def setCVVoltage(volt, serial): # need to add in hex conversion
-    print("Set CV mode voltage value (volts):", volt)
+def setCVVoltage(volt, serial):
+#    print("Set CV mode voltage value (volts):", volt)
     val = int(volt * 1000)
     cmd = [0] * 26
     cmd[2] = 0x2C
@@ -202,7 +206,7 @@ def setCVVoltage(volt, serial): # need to add in hex conversion
     command(cmd, serial)
     
 def readCVVoltage(serial):
-    print("Read CV mode voltage value")
+#    print("Read CV mode voltage value")
     cmd = [0] * 26
     cmd[2] = 0x2D
     resp = command(cmd, serial)
@@ -210,44 +214,34 @@ def readCVVoltage(serial):
     return volt_in_CV
     
 def curve(voc, opv_sample, log_file, serial):
-    step_count = 0
+    print("Measure intermediate current-voltage points")
     setMode(1,serial)
-    readMode(serial)
-    time.sleep(0.5)
-    setCVVoltage(voc,serial)
-    readCVVoltage(serial)
-    time.sleep(0.5)
-    for step_count in range(100):
-        reading = readInputLevels(serial)
-        volt_step = reading[0]
-        new_volt_step = volt_step - 0.1
-        if new_volt_step > 0:
-            setCVVoltage(new_volt_step,serial)
-            readCVVoltage(serial)
-            curve_pt = readInputLevels(serial)
-            print(curve_pt)
-            write_data(log_file, [opv_sample, time.time(), curve_pt[0], curve_pt[1], curve_pt[2]])
-            step_count += 1
-            time.sleep(0.5)
-        else:
-            step_count = 101
-        return
-            # need error statement, 'Parameter Incorrect' when None type is fed to function
-            
+    time.sleep(1)
+    volt_step = voc
+    while volt_step > 0.5:
+        setCVVoltage(volt_step,serial)
+        time.sleep(0.1)
+        curve_pt = readInputLevels(serial)
+        print(curve_pt)
+        write_data(log_file, [opv_sample, time.time(), curve_pt[0], curve_pt[1], curve_pt[2]])
+        new_volt_step = curve_pt[0] - 0.5
+        volt_step = new_volt_step
+        time.sleep(0.1)
+    time.sleep(1)
+    setCVVoltage(1,serial)            
     
-        
 # Short circuit proof
         
 def shortcircuit(opv_sample, log_file, serial):
+    print("Measure short circuit current (nearest to 0 volts)")
     setMode(1,serial) # Set operation mode to CV
-    readMode(serial) # Read operation mode
     time.sleep(1)
     setCVVoltage(0.1,serial) # Set CV mode voltage to 0.1 volts (nearest value to 0 volts)
     time.sleep(1)
-    readCVVoltage(serial)
     sc = readInputLevels(serial)
     write_data(log_file, [opv_sample, time.time(),  sc[0], sc[1], sc[2]])
     jsc = sc[1]
+    print(jsc)
     return jsc
 
 # Set local control mode ON
@@ -266,6 +260,7 @@ def data_file(header_list, log_file_postfix=''):
     
     log_file = 'data_log_' + log_file_postfix + '.csv'
     log_file_header = header_list
+#    header_list = ['OPV', 'Time' , 'volts', 'current', 'power']
     
     if os.path.exists(log_file) is not True:
         with open(log_file, mode='a',newline='') as the_file:
@@ -281,22 +276,23 @@ def write_data(log_file, data_list):
 # Main testing function for IV curve measurement
 
 def sweep(opv_sample, serial):
-    
-#    print('Setup DC load and logging')
-#    init_load()
-#    data_file(['OPV', 'Time' , 'volts', 'current', 'power'], log_file_postfix='LOAD')
-    
+        
     print('Begin IV curve measurement')
-#   make each OPV sheet a class and assign voc, mpp, jsc as objects
+
     log_file = 'data_log_LOAD.csv'
-    voc = 1.0
     
-    opencircuit(opv_sample, log_file, serial)
+    voc = opencircuit(opv_sample, log_file, serial)
+    
     time.sleep(1)
+    
     curve(voc, opv_sample, log_file, serial)
+    
     time.sleep(1)
+    
     shortcircuit(opv_sample, log_file, serial)
     
+
     
+
     
     
