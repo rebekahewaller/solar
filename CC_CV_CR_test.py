@@ -27,6 +27,7 @@ def init_load():
     ser.open()
     ser.flush
     return ser
+                            # SerialException: could not open port 'COM3': PermissionError(13, 'Access is denied.', None, 5)
 
 def csum(command):  
     checksum = 0
@@ -186,8 +187,9 @@ def readInputLevels(serial):
 def opencircuit(opv_sample, log_file, serial):
     print("Open circuit voltage measurement")
     setMode(0,serial) # Set operation mode to CC
+    time.sleep(.5)
     setCCCurrent(0,serial) # Set CC mode current to 0 amps
-    time.sleep(1)
+    time.sleep(.5)
     oc = readInputLevels(serial) # Read open circuit levels
     write_data(log_file, [opv_sample, timenow,  oc[0], oc[1], oc[2]]) # write data to .csv file
     voc = oc[0] # open circuit voltage
@@ -237,7 +239,7 @@ def curve(voc, opv_sample, log_file, serial):
 def shortcircuit(opv_sample, log_file, serial):
     print("Measure short circuit current (nearest to 0 volts)")
     setMode(1,serial) # Set operation mode to CV
-    time.sleep(1)
+    time.sleep(.5)
     setCVVoltage(0.1,serial) # Set CV mode voltage to 0.1 volts (nearest value to 0 volts)
     time.sleep(1)
     sc = readInputLevels(serial)
@@ -281,7 +283,7 @@ def sweep(opv_sample, serial):
     
     inputOn(1,serial)
         
-    time.sleep(1)
+    time.sleep(0.5)
     
     print('Begin IV curve measurement')
 
@@ -289,35 +291,40 @@ def sweep(opv_sample, serial):
     
     voc = opencircuit(opv_sample, log_file, serial)
     
-    time.sleep(1)
+    time.sleep(0.5)
     
     curve(voc, opv_sample, log_file, serial)
     
-    time.sleep(1)
+    time.sleep(0.5)
     
     shortcircuit(opv_sample, log_file, serial)
     
-    time.sleep(1)
+    time.sleep(0.5)
     
     inputOff(serial)
     
-#    s.enter(30, 1, sweep(opv_sample,serial), (sc,))
+    s.enter(300, 1, sweep, (opv_sample, serial))
 
-
-def main(serial):
+def main():
     
+#    if ser.isOpen('COM3') is not True:
     serial = init_load()
-    time.sleep(5)
-    remoteMode(1,serial)
-    time.sleep(5)
+#    else:
+#        return
+    
+        # change to if statement for check to see if port is connected, connect if no
+    time.sleep(1)
+    remoteMode(1,serial) # change to if statement for check to see in Remote Mode, set to Remote Mode if yes
+    time.sleep(1)
     
     data_file(['OPV_Sample', 'Time' , 'volts', 'current', 'power'], log_file_postfix='LOAD')
-    time.sleep(5)
+    time.sleep(1)
 
     # determine which OPV is connected
     opv_sample = '1'
     sweep(opv_sample,serial)
     
     
-#    s.enter(30, 1, sweep(opv_sample,serial,sc), (s,))
-#    s.run()
+    
+    s.enter(300, 1, sweep, (opv_sample, serial))
+    s.run()
