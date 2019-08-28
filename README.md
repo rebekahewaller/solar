@@ -1,6 +1,6 @@
 # Solar Panel Project
 
-# Installation
+## Installation
 
 Requires Python 3.
 
@@ -8,12 +8,12 @@ Requires Python 3.
 $ python3 -m pip install -r requirements.txt
 ```
 
-# Running 
+## Running 
 
 ```
-# ./cc.py
+$ ./cc.py
 ```
 
-# Author
+## Author
 
 My Name <email>
