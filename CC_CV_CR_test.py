@@ -10,10 +10,7 @@ Created on Tue Aug 13 16:30:16 2019
 import serial, time, sched, csv, os
 from time import strftime
 
-timenow = strftime("%a, %d %b %Y %H:%M:%S")
 s = sched.scheduler(time.time, time.sleep)
-
-#import bk8500b #getting Name Error whenever attempting to use function from library
 
 # Input data: serial communication, number of samples, PV data
     
@@ -49,7 +46,6 @@ def command(command, serial):
     resp = serial.read(26)
     if resp[2] == 0x12:
         if resp[3] == 0x80:
-#            print('Success')
             return
         elif resp[3] == 0x90:
             raise Exception('Checksum Error')
@@ -191,7 +187,7 @@ def opencircuit(opv_sample, log_file, serial):
     setCCCurrent(0,serial) # Set CC mode current to 0 amps
     time.sleep(.5)
     oc = readInputLevels(serial) # Read open circuit levels
-    write_data(log_file, [opv_sample, timenow,  oc[0], oc[1], oc[2]]) # write data to .csv file
+    write_data(log_file, [opv_sample, strftime("%a, %d %b %Y %H:%M:%S"),  oc[0], oc[1], oc[2]]) # write data to .csv file
     voc = oc[0] # open circuit voltage
     print(voc)
     return voc
@@ -227,7 +223,7 @@ def curve(voc, opv_sample, log_file, serial):
         time.sleep(0.1)
         curve_pt = readInputLevels(serial)
         print(curve_pt)
-        write_data(log_file, [opv_sample, timenow, curve_pt[0], curve_pt[1], curve_pt[2]])
+        write_data(log_file, [opv_sample, strftime("%a, %d %b %Y %H:%M:%S"), curve_pt[0], curve_pt[1], curve_pt[2]])
         new_volt_step = curve_pt[0] - 0.5
         volt_step = new_volt_step
         time.sleep(0.1)
@@ -243,7 +239,7 @@ def shortcircuit(opv_sample, log_file, serial):
     setCVVoltage(0.1,serial) # Set CV mode voltage to 0.1 volts (nearest value to 0 volts)
     time.sleep(1)
     sc = readInputLevels(serial)
-    write_data(log_file, [opv_sample, timenow,  sc[0], sc[1], sc[2]])
+    write_data(log_file, [opv_sample, strftime("%a, %d %b %Y %H:%M:%S"),  sc[0], sc[1], sc[2]])
     jsc = sc[1]
     print(jsc)
     return jsc
@@ -280,7 +276,7 @@ def write_data(log_file, data_list):
 # Main testing function for IV curve measurement
 
 def sweep(opv_sample, serial):
-    
+        
     inputOn(1,serial)
         
     time.sleep(0.5)
@@ -303,21 +299,17 @@ def sweep(opv_sample, serial):
     
     inputOff(serial)
     
-    s.enter(300, 1, sweep, (opv_sample, serial))
+    s.enter(15, 1, sweep, (opv_sample, serial))
 
 def main():
     
-#    if ser.isOpen('COM3') is not True:
     serial = init_load()
-#    else:
-#        return
-    
-        # change to if statement for check to see if port is connected, connect if no
+
     time.sleep(1)
-    remoteMode(1,serial) # change to if statement for check to see in Remote Mode, set to Remote Mode if yes
+    remoteMode(1,serial)
     time.sleep(1)
     
-    data_file(['OPV_Sample', 'Time' , 'volts', 'current', 'power'], log_file_postfix='LOAD')
+    data_file(['opv_sample', 'time' , 'volts', 'current', 'power'], log_file_postfix='LOAD')
     time.sleep(1)
 
     # determine which OPV is connected
@@ -326,5 +318,10 @@ def main():
     
     
     
-    s.enter(300, 1, sweep, (opv_sample, serial))
+    s.enter(15, 1, sweep, (opv_sample, serial)) # need different function to only execute after 30 seconds has elapsed since function was complete
     s.run()
+    
+# conditional statement for init_load function
+# improve datalogging with sweep ids and identifying MPP, Voc, Jsc for each sweep
+# measure time for executing each function
+# create class for and generalize write_data function
