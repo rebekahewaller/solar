@@ -7,89 +7,23 @@ Created on Tue Aug 13 16:30:16 2019
 
 ### Program for controlling BK8542B DC Electronic Load for IV curve measurement of solar panel ###
 
-import argparse, serial, time, sched, csv, os # matplotlib, pandas
+import serial, time, csv, os, schedule
 from time import strftime
-from serial import Serial
 from array import array
+    
+global ser, resp_status_dict, mode_cc, mode_cv, mode_cw, mode_cr, scale_curr, scale_volt, scale_watt, scale_resi
 
-# Input data: serial communication, number of samples, PV data
-    
-# Serial communication configuration (PC-load) and start
+# Initialize PC-load serial communication and global variables
 
-ser = serial.Serial()
-ser.baudrate = 9600
-ser.port = "COM3"
-ser.timeout = 1
-ser.open()
-ser.flush
-return ser
-
-# _____________________________________________________________________________
-
-def get_args():
-    """Get command line arguments"""
-    
-    parser = argparse.ArgumentParser(
-            description='Argparse Python script',
-            formatter_class=argparse.ArgumentDefaultHelpFormatter)
-    
-    parser.add_argument('-p',
-                        '--port',
-                        help='Com Port',
-                        metavar='str',
-                        type=str,
-                        default='COM3')
-    
-    parser.add_argument('-b',
-                        '--baudrate',
-                        help='Baud rate',
-                        metavar='int',
-                        type=int,
-                        default=9600)
-    
-    parser.add_argument('-t',
-                        '--time_to_sleep',
-                        help='Time seconds to sleep b/w commands',
-                        metavar='float',
-                        type=float,
-                        default=0.250)
-    
-    parser.add_argument('-c',
-                        '--mode_cc',
-                        help='Constant current mode',
-                        metavar='int',
-                        type=int,
-                        default=0)
-    
-    parser.add_argument('-v',
-                    '--mode_cc',
-                    help='Constant voltage mode',
-                    metavar='int',
-                    type=int,
-                    default=1)
-    
-    parser.add_argument('-w',
-                        '--mode_cv',
-                        help='Constant voltage mode',
-                        metavar='int',
-                        type=int,
-                        default=2)
-    
-    parser.add_argument('-r',
-                        '--mode_cr',
-                        help='Constant resistance mode',
-                        metavar='int',
-                        type=int,
-                        default=3)
-
-
-def init_load(port, baudrate, timeout):
+def init_load():
     """Docstring"""
     
-    baudrate = baudrate
-    port = port
+    global ser, resp_status_dict, mode_cc, mode_cv, mode_cw, mode_cr, scale_curr, scale_volt, scale_watt, scale_resi
+
+    baudrate = 9600
+    port = "COM3"
     
-    ser = Serial(port,baudrate, timeout=1)
+    ser = serial.Serial(port,baudrate, timeout=1)
     
     resp_status_dict = {
             0x90: "ERROR: Invalid checksum",
@@ -106,8 +40,10 @@ def init_load(port, baudrate, timeout):
     
     scale_volt = 1000
     scale_curr = 10000
-    scale_watt = 10000    
-
+    scale_watt = 1000
+    scale_resi = 1000    
+    
+    
 def close():
     """Docstring"""
     ser.close()
@@ -210,9 +146,7 @@ def get_input_values():
         volts = (resp[3] | (resp[4] << 8) | (resp[5] << 16) | (resp[6] << 24)) / scale_volt
         current = (resp[7] | (resp[8] << 8) | (resp[9] << 16) | (resp[10] << 24)) / scale_curr
         power = (resp[11] | (resp[12] << 8) | (resp[13] << 16) | (resp[14] << 24)) / scale_watt
-        op_state = hex(resp[15])
-        demand_state = hex(resp[16] | (resp[17] << 8))
-        return (volts, current, power, op_state, demand_state)
+        return (volts, current, power)
     else:
         return None
 
@@ -240,7 +174,7 @@ def set_remote_sense(is_remote=False):
     return resp
 
 def get_remote_sense():
-    "Docstring"""
+    """Docstring"""
     
     
     built_packet = build_cmd(0x57)
@@ -256,7 +190,11 @@ def set_remote_control(is_remote=False):
     
     built_packet = build_cmd(0x20, value=int(is_remote))
     resp = send_recv_cmd(built_packet)
-    return resp
+    
+    if is_remote == False:
+        return False
+    else:
+        return True
 
 def set_local_control(is_local=True):
     """Docstring"""
@@ -389,6 +327,8 @@ def get_CC_current():
     else:
         return None
 
+def get_CP_power():
+    """Docstring"""
 def set_CP_power(cp_power=0):
     """Docstring"""
     
@@ -396,8 +336,6 @@ def set_CP_power(cp_power=0):
     resp = send_recv_cmd(built_packet)
     return resp
 
-def get_CP_power():
-    """Docstring"""
     
     built_packet = build_cmd(0x2F)
     resp = send_recv_cmd(built_packet)
@@ -410,7 +348,7 @@ def get_CP_power():
 def set_CR_resistance(cr_resistance=0):
     """Docstring"""
     
-    built_packet = build_cmd(0x30, value=int(cr_resistance * SCALE_RESIST))
+    built_packet = build_cmd(0x30, value=int(cr_resistance * scale_resi))
     resp = send_recv_cmd(built_packet)
     return resp
 
@@ -421,7 +359,7 @@ def get_CR_resistance():
     resp = send_recv_cmd(built_packet)
     
     if resp is not None:
-        return parse_data(resp) / SCALE_RESIST
+        return parse_data(resp) / scale_resi
     else:
         return None
 
@@ -445,367 +383,118 @@ def get_bat_volts_min():
     
 # Save data: current, voltage, and power
 
-def make_data_file(header_list, log_file_postfix=''):
+def data_file(log_file_postfix=''):
     """Docstring"""
-    
-    header_list = ['opv', 'sample_id', 'time' , 'volts', 'current', 'power']
 
     log_file = 'data_log_' + log_file_postfix + '.csv'
-    log_file_header = header_list
+    log_file_header = ['opv', 'sample_id', 'time' , 'volts', 'current', 'power']
     
     if os.path.exists(log_file) is not True:
         with open(log_file, mode='a',newline='') as the_file:
             writer = csv.writer(the_file, dialect='excel')
-            writer.writerow(header_list)
+            writer.writerow(log_file_header)
             
-def make_data_list(opv, sample_id, timenow, volt, curr, watt):
+    return log_file
+            
+def data_point(inputs: list):
     """Organizes data for export to excel"""
     
-    data_list = [opv, sample_id, timenow, volt, curr, watt]
+    opv = '1'
+    sample_id = '0'
+    timenow = strftime("%a, %d %b %Y %H:%M:%S")
+    volts = inputs[0]
+    current = inputs[1]
+    power = inputs[2]
     
+    data_point = [opv, sample_id, timenow, volts, current, power]
+
+    return data_point
             
-def write_data_tofile(log_file, data_list):
-        
+def write_data_tofile(data_point):
+    
+    log_file = data_file()
     with open(log_file, mode='a',newline='') as the_file:
         writer = csv.writer(the_file, dialect='excel')
-        writer.writerow(data_list)
-    
+        writer.writerow(data_point)
+
+# IV curve measurement
+        
+
 def open_circ():
     """Open circuit voltage measurement"""
 
     set_mode(mode_cc) # set  operation mode to CC
     time.sleep(.250)
     set_CC_current(cc_current=0) # set CC mode current to 0 amps
-    time.sleep(.250)
-    get_input_values() # read open circuits levels
+    time.sleep(.1)
     
+    oc_vals =  get_input_values() # read open circuits levels
+    oc_data_point = data_point(oc_vals) # create data point for open circuit measurement
+    voc = oc_data_point[3] # open circuit voltage measurement
+    print('Open circuit voltage: ', voc)
+    write_data_tofile(oc_data_point) # write data to file
     
-
-
-def opencircuit(opv_sample, log_file, serial):
-    print("Open circuit voltage measurement")
-    setMode(0,serial) # Set operation mode to CC
-    time.sleep(.5)
-    setCCCurrent(0,serial) # Set CC mode current to 0 amps
-    time.sleep(.5)
-    oc = readInputLevels(serial) # Read open circuit levels
-    write_data(log_file, [opv_sample, strftime("%a, %d %b %Y %H:%M:%S"),  oc[0], oc[1], oc[2]]) # write data to .csv file
-    voc = oc[0] # open circuit voltage
-    print(voc)
-    return voc   
-    
-    
-#______________________________________________________________________________
-
-def csum(command):
-    checksum = 0
-    for i in range(25):     
-        checksum = checksum + command[i]                    
-    return (0xFF & checksum)
-
-def printCmd(buff):
-    x = " "        
-    for y in range(len(buff)):
-        x+=" "
-        x+=hex(buff[y]).replace('0x','')   
-    print(x)      
-
-def command(command, serial):                          
-    command[0] = 0xAA
-    command[25] = csum(command)
-    serial.write(command)                        
-    resp = serial.read(26)
-    if resp[2] == 0x12:
-        if resp[3] == 0x80:
-            return
-        elif resp[3] == 0x90:
-            raise Exception('Checksum Error')
-        elif resp[3] == 0xA0:
-            raise Exception('Parameter Incorrect')
-        elif resp[3] == 0xB0:
-            raise Exception('Unrecognized Command')
-        elif resp[3] == 0xC0:
-            raise Exception('Invalid Command')
-            
-        print("Command Sent:\t\t",end=' ')
-        printCmd(command)
-            
-        print("Reponse Received:\t",end=' ')     
-        printCmd(resp)
-    else:
-        return resp
-
-# Setting protection functions: current, voltage, and power
-
-# Set remote control ON
-
-def remoteMode(state, serial):
-    print('Remote Mode')
-    cmd = [0] * 26
-    cmd[2] = 0x20
-    if bool(state):
-        cmd[3] = 1
-    else:
-        cmd[3] = 0
-    command(cmd, serial)
-
-def inputOn(state, serial):
-    print('Input On', state)
-    cmd = [0] * 26
-    cmd[2] = 0x21
-    if bool(state):
-        cmd[3] = 1
-    else:
-        cmd[3] = 0
-    command(cmd, serial)
-    
-def inputOff(serial):
-    print("Turning Input OFF")
-    cmd = [0] * 26
-    cmd[2] = 0x21                       
-    command(cmd, serial)
-    
-# VOn Mode turns on load only if certain voltage is reached
-    
-def setVonMode(mode,serial):
-    print("Set Von mode to:", mode)
-    cmd = [0] * 26
-    cmd[2] = 0x0E
-    if mode == 'living':
-        cmd[3] = 0x00 #Von LIVING mode
-    elif mode == 'latch':
-        cmd[3] = 0x01 #Von LATCH 
-    else:
-        print("Von mode not specified")
-    command(cmd, serial)
-
-def readVonMode(serial):
-    print("Read Von mode")
-    cmd = [0] * 26
-    cmd[2] = 0x0F
-    resp = command(cmd, serial)
-    return resp
-
-def setVonPoint(von_volt, serial):
-    print("Set Von point (volts):", von_volt)
-    val = int(von_volt * 1000)
-    cmd = [0] * 26
-    cmd[2] = 0x10
-    cmd[3] = val & 0x00FF
-    cmd[4] = (val >> 8) & 0xFF
-    cmd[5] = (val >> 16) & 0xFF
-    cmd[6] = (val >> 24) & 0xFF
-    command(cmd, serial)
-
-def readVonPoint(serial):
-    print("Read Von point")
-    cmd = [0] * 26
-    cmd[2] = 0x11
-    resp = command(cmd, serial)
-    von_volt = (resp[3] + (resp[4] << 8) + (resp[5] << 16) + (resp[6] << 24)) / 1000.00
-    return von_volt
-
-# Open circuit proof
-
-def setMode(mode, serial):
-#    print("Set CC/CV/CW/CR operation mode of electronic load.")
-    cmd = [0] * 26
-    cmd[2] = 0x28
-    cmd[3] = mode # CC = 0, CV = 1, CW = 2, CR = 3
-    command(cmd, serial)
-
-def readMode(serial):
-#    print("Read the operation mode.")
-    cmd = [0] * 26
-    cmd[2] = 0x29
-    command(cmd, serial)
-    
-def setCCCurrent(curr, serial):
-#    print("Set CC mode current value (amps):", curr)
-    val = int(curr * 10000)
-    cmd = [0] * 26
-    cmd[2] = 0x2A
-    cmd[3] = val & 0xFF
-    cmd[4] = (val >> 8) & 0xFF
-    cmd[5] = (val >> 16) & 0xFF
-    cmd[6] = (val >> 24) & 0xFF
-    command(cmd, serial)
-    
-def readCCCurrent(serial):
-#    print("Read CC mode current value")
-    cmd = [0] * 26
-    cmd[2] = 0x2B
-    resp = command(cmd, serial)
-    curr_in_CC = (resp[3] + (resp[4] << 8) + (resp[5] << 16) + (resp[6] << 24)) / 10000.00
-    return curr_in_CC
-
-def readInputLevels(serial):
-#    print("Read input voltage, current, power and relative state")
-    cmd = [0] * 26 # byte 3 to 6 = voltage (1 mV), byte 7 to 10 = current (0.1 mA)
-    cmd[2] = 0x5F # byte 11 to 14 = power (1 mW)
-    resp = command(cmd, serial)
-    volt_in = (resp[3] + (resp[4] << 8) + (resp[5] << 16) + (resp[6] << 24)) / 1000.00
-    curr_in = (resp[7] + (resp[8] << 8) + (resp[9] << 16) + (resp[10] << 24)) / 10000.00
-    power_in = (resp[11] + (resp[12] << 8) + (resp[13] << 16) + (resp[14] << 24)) / 1000.00
-#    op_state = hex(resp[15])
-#    demand_state = hex((resp[16] + resp[17] << 8))
-    return (volt_in, curr_in, power_in)
-        
-def opencircuit(opv_sample, log_file, serial):
-    print("Open circuit voltage measurement")
-    setMode(0,serial) # Set operation mode to CC
-    time.sleep(.5)
-    setCCCurrent(0,serial) # Set CC mode current to 0 amps
-    time.sleep(.5)
-    oc = readInputLevels(serial) # Read open circuit levels
-    write_data(log_file, [opv_sample, strftime("%a, %d %b %Y %H:%M:%S"),  oc[0], oc[1], oc[2]]) # write data to .csv file
-    voc = oc[0] # open circuit voltage
-    print(voc)
     return voc
+  
+def iv_curve(voc):
+    """Measure intermediate current voltage points"""
     
-# Intermediate steps: sampling between open circuit voltage and short circuit current
-
-def setCVVoltage(volt, serial):
-#    print("Set CV mode voltage value (volts):", volt)
-    val = int(volt * 1000)
-    cmd = [0] * 26
-    cmd[2] = 0x2C
-    cmd[3] = val & 0xFF
-    cmd[4] = (val >> 8) & 0xFF
-    cmd[5] = (val >> 16) & 0xFF
-    cmd[6] = (val >> 24) & 0xFF
-    command(cmd, serial)
-    
-def readCVVoltage(serial):
-#    print("Read CV mode voltage value")
-    cmd = [0] * 26
-    cmd[2] = 0x2D
-    resp = command(cmd, serial)
-    volt_in_CV = (resp[3] + (resp[4] << 8) + (resp[5] << 16) + (resp[6] << 24)) / 1000.00
-    return volt_in_CV
-    
-def curve(voc, opv_sample, log_file, serial):
-    print("Measure intermediate current-voltage points")
-    setMode(1,serial)
-    time.sleep(1)
+    set_mode(mode_cv) # set operation mode to CC
+    time.sleep(.1)
     volt_step = voc
     while volt_step > 0.5:
-        setCVVoltage(volt_step,serial)
-        time.sleep(0.1)
-        curve_pt = readInputLevels(serial)
-        print(curve_pt)
-        write_data(log_file, [opv_sample, strftime("%a, %d %b %Y %H:%M:%S"), curve_pt[0], curve_pt[1], curve_pt[2]])
-        new_volt_step = curve_pt[0] - 0.5
+        set_CV_volts(volt_step)
+        time.sleep(.1)
+        curve_vals = get_input_values()
+        curve_data_point = data_point(curve_vals)
+        print('voltage, current, power: ', curve_data_point[3], curve_data_point[4], curve_data_point[5])
+        write_data_tofile(curve_data_point)
+        new_volt_step = curve_data_point[3] - 0.5
         volt_step = new_volt_step
-        time.sleep(0.1)
-    time.sleep(1)
-    setCVVoltage(1,serial)            
+    pass
     
-# Short circuit proof
-        
-def shortcircuit(opv_sample, log_file, serial):
-    print("Measure short circuit current (nearest to 0 volts)")
-    setMode(1,serial) # Set operation mode to CV
-    time.sleep(.5)
-    setCVVoltage(0.1,serial) # Set CV mode voltage to 0.1 volts (nearest value to 0 volts)
-    time.sleep(1)
-    sc = readInputLevels(serial)
-    write_data(log_file, [opv_sample, strftime("%a, %d %b %Y %H:%M:%S"),  sc[0], sc[1], sc[2]])
-    jsc = sc[1]
-    print(jsc)
-    return jsc
-
-# Set local control mode ON
-
-def setLocalMode(serial):
-    cmd = [0] * 26
-    cmd[2] = 0x20
-    cmd[3] = 0
-    command(cmd, serial)
-    print("Goodbye")
-    serial.close()
+def short_circ():
+    """Measure short circuit current (nearest to 0 volts)"""
     
-# Save data: current, voltage, and power
-
-def data_file(header_list, log_file_postfix=''):
+    set_mode(mode_cv)
+    time.sleep(.250)
+    set_CV_volts(0.1)
+    time.sleep(.250)
     
-    log_file = 'data_log_' + log_file_postfix + '.csv'
-    log_file_header = header_list
-#    header_list = ['OPV', 'Time' , 'volts', 'current', 'power']
-    
-    if os.path.exists(log_file) is not True:
-        with open(log_file, mode='a',newline='') as the_file:
-            writer = csv.writer(the_file, dialect='excel')
-            writer.writerow(header_list)
-            
-def write_data(log_file, data_list):
-        
-    with open(log_file, mode='a',newline='') as the_file:
-        writer = csv.writer(the_file, dialect='excel')
-        writer.writerow(data_list)
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                
-# Main testing function for IV curve measurement
+    sc_vals = get_input_values()
+    sc_data_point = data_point(sc_vals)
+    jsc = sc_data_point[4]
+    print('Short circuit current: ', jsc)
+    write_data_tofile(sc_data_point)
 
-def sweep(opv_sample, serial):
-        
-    inputOn(1,serial)
-        
-    time.sleep(0.5)
+    return jsc      
+
+def sweep():
+    """Measure entire IV curve"""
+    
+    set_enable_load(True) # turn input ON
+    time.sleep(.250)
     
     print('Begin IV curve measurement')
+    
+    voc = open_circ() # measure open circuit voltage
+    iv_curve(voc) # measure iv curve
+    short_circ() # measure short circuit current
+    
+    time.sleep(.250)
+    set_enable_load(False) # turn input OFF
 
-    log_file = 'data_log_LOAD.csv'
-    
-    voc = opencircuit(opv_sample, log_file, serial)
-    
-    time.sleep(0.5)
-    
-    curve(voc, opv_sample, log_file, serial)
-    
-    time.sleep(0.5)
-    
-    shortcircuit(opv_sample, log_file, serial)
-    
-    time.sleep(0.5)
-    
-    inputOff(serial)
-        
-    
 def main():
     
-#    serial = init_load()
+    data_file('LOAD')
+    
+    if (ser.isOpen() == False): # check if serial port is already open
+        init_load() # establish PC-load serial connection
+    
+    time.sleep(.250)
+    set_remote_control(True) # set remote control ON
+    
+    sweep()
 
-    time.sleep(1)
-    
-    remoteMode(1,serial) # magic numbers... what do they mean???
-    
-    time.sleep(1)
-    
-    data_file(['opv_sample', 'time' , 'volts', 'current', 'power'], log_file_postfix='LOAD')
-    
-    time.sleep(1)
-
-    # determine which OPV is connected
-    opv_sample = '1'
-    
-    sweep(opv_sample,serial)
-    
-    s = sched.scheduler(time.time, time.sleep)
-    
-    s.enter(15, 1, sweep, (opv_sample, serial)) # need different function to only execute after 30 seconds has elapsed since function was complete
-    
-    s.run()
-    
-    
-# conditional statement for init_load function
-# improve datalogging with sweep ids and identifying MPP, Voc, Jsc for each sweep
-# measure time for executing each function
-# create class for and generalize write_data function
-    
-# pylint 
-# change all "serial" vars to "srl"
-# pure functions are functions that can be tested
-    
-if __name__ == '__main__':
-    main()
+#______________________________________________________________________________
     
