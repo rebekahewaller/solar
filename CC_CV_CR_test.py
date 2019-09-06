@@ -8,6 +8,7 @@ Created on Tue Aug 13 16:30:16 2019
 ### Program for controlling BK8542B DC Electronic Load for IV curve measurement of solar panel ###
 
 import serial, time, csv, os, schedule
+import itertools as it
 from time import strftime
 from array import array
     
@@ -396,19 +397,35 @@ def data_file(log_file_postfix=''):
             
     return log_file
             
+def gen_new_sample_id():
+    
+    sample_id = 0
+    if data_point_is_made() == True:
+        sample_id += 1
+        return sample_id
+    
+
 def data_point(inputs: list):
     """Organizes data for export to excel"""
     
     opv = '1'
-    sample_id = '0'
-    timenow = strftime("%a, %d %b %Y %H:%M:%S")
+    
+    sample_id = 0
+    
+    timenow = strftime("%#m/%#d/%Y %#H:%M")
     volts = inputs[0]
     current = inputs[1]
     power = inputs[2]
     
     data_point = [opv, sample_id, timenow, volts, current, power]
 
+    if data_point == True:
+        sample_id += 
+        
     return data_point
+
+    if data_point == True:
+        sample_id += 1
             
 def write_data_tofile(data_point):
     
@@ -486,15 +503,17 @@ def sweep():
 
 def main():
     
-    data_file('LOAD')
+    data_file(log_file_postfix='LOAD')
     
-    if (ser.isOpen() == False): # check if serial port is already open
-        init_load() # establish PC-load serial connection
+#    if (serial.Serial.isOpen("COM3") == False): # check if serial port is already open
+    init_load() # establish PC-load serial connection
     
     time.sleep(.250)
     set_remote_control(True) # set remote control ON
     
-    sweep()
+    while True:
+        time.sleep(5)
+        sweep()
 
 #______________________________________________________________________________
     
