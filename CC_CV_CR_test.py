@@ -12,14 +12,17 @@ import itertools as it
 from time import strftime
 from array import array
     
-global ser, resp_status_dict, mode_cc, mode_cv, mode_cw, mode_cr, scale_curr, scale_volt, scale_watt, scale_resi
+global ser, ser_relay, resp_status_dict, mode_cc, mode_cv, mode_cw, mode_cr
+global scale_curr, scale_volt, scale_watt, scale_resi
+global r1, r2, r3, r4, r5, r6, r7, r8
 
 # Initialize PC-load serial communication and global variables
 
 def init_load():
     """Docstring"""
     
-    global ser, resp_status_dict, mode_cc, mode_cv, mode_cw, mode_cr, scale_curr, scale_volt, scale_watt, scale_resi
+    global ser, resp_status_dict, mode_cc, mode_cv, mode_cw, mode_cr
+    global scale_curr, scale_volt, scale_watt, scale_resi
 
     baudrate = 9600
     port = "COM3"
@@ -44,7 +47,7 @@ def init_load():
     scale_watt = 1000
     scale_resi = 1000    
     
-    
+
 def close():
     """Docstring"""
     ser.close()
@@ -382,6 +385,78 @@ def get_bat_volts_min():
     else:
         return None
     
+#______________________________________________________________________________
+        
+### Vellemen VM8090 relay card communication and control
+        
+def init_relay_card():
+    
+    global ser_relay 
+    
+    port = "COM5"
+    baudrate = 19200
+    
+    ser_relay = serial.Serial(port,baudrate, timeout=1)
+
+def close_relay():
+    """Disconnect from relay card"""
+    
+    ser_relay.close()
+    
+    
+def build_cmd_relay(cmd_relay, which_relay):
+    """Construct command for relay card"""
+    
+    global r1, r2, r3, r4, r5, r6, r7, r8
+    
+    r1 = 0x01
+    r2 = 0x02
+    r3 = 0x04
+    r4 = 0x08
+    r5 = 0x10
+    r6 = 0x20
+    r7 = 0x40
+    r8 = 0x80
+    
+    build_cmd_relay = array('B', [0x00]*7)
+    
+    stx = build_cmd_relay[0] 
+    cmd = build_cmd_relay[1]
+    msk = build_cmd_relay[2]
+    param1 = build_cmd_relay[3]
+    param2 = build_cmd_relay[4]
+    chk = build_cmd_relay[5]
+    etx = build_cmd_relay[6]
+    
+    
+    stx = 0x04 # start byte
+    cmd = cmd_relay & 0xFF # command byte
+    msk = which_relay # mask byte to select relay
+    chk = -(stx + cmd + msk + param1 + param2) + 1 # checksum of byte packet
+    etx = 0x0F # end byte
+    
+    return build_cmd_relay.tobytes()
+
+def send_cmd_relay(cmd_relay_packet):
+    """Send or receive command packet from relay card"""
+    
+    ser_relay.reset_output_buffer()
+    ser_relay.reset_input_buffer()
+    
+    ser_relay.write(cmd_relay_packet)
+    
+def switch_relay_on(which_relay):
+    """Switch on one or more relays"""
+    
+    built_packet_relay = build_cmd_relay(0x11, which_relay)
+    resp =  send_cmd_relay(built_packet_relay)
+    return resp
+
+def switch_relay_off(which_relay):
+    built_packet_relay = build_cmd_relay(0x12, which_relay)
+    resp =  send_cmd_relay(built_packet_relay)
+    return resp
+    
 # Save data: current, voltage, and power
 
 def data_file(log_file_postfix=''):
@@ -396,14 +471,6 @@ def data_file(log_file_postfix=''):
             writer.writerow(log_file_header)
             
     return log_file
-            
-def gen_new_sample_id():
-    
-    sample_id = 0
-    if data_point_is_made() == True:
-        sample_id += 1
-        return sample_id
-    
 
 def data_point(inputs: list):
     """Organizes data for export to excel"""
@@ -420,12 +487,9 @@ def data_point(inputs: list):
     data_point = [opv, sample_id, timenow, volts, current, power]
 
     if data_point == True:
-        sample_id += 
+        sample_id += 1
         
     return data_point
-
-    if data_point == True:
-        sample_id += 1
             
 def write_data_tofile(data_point):
     
