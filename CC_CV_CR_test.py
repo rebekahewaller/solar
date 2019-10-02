@@ -25,7 +25,7 @@ def init_load():
     global scale_curr, scale_volt, scale_watt, scale_resi
 
     baudrate = 9600
-    port = "COM3"
+    port = "COM4"
     
     ser = serial.Serial(port,baudrate, timeout=1)
     
@@ -459,11 +459,11 @@ def switch_relay_off(which_relay):
     
 # Save data: current, voltage, and power
 
-def data_file(log_file_postfix=''):
+def data_file():
     """Docstring"""
 
-    log_file = 'data_log_' + log_file_postfix + '.csv'
-    log_file_header = ['opv', 'sample_id', 'time' , 'volts', 'current', 'power']
+    log_file = 'data_log_ivcurve_1022019.csv'
+    log_file_header = ['sample_id','opv', 'time' , 'volts', 'current', 'power']
     
     if os.path.exists(log_file) is not True:
         with open(log_file, mode='a',newline='') as the_file:
@@ -477,26 +477,30 @@ def data_point(inputs: list):
     
     opv = '1'
     
-    sample_id = 0
-    
     timenow = strftime("%#m/%#d/%Y %#H:%M")
     volts = inputs[0]
     current = inputs[1]
     power = inputs[2]
     
-    data_point = [opv, sample_id, timenow, volts, current, power]
+    data_point = [opv, timenow, volts, current, power]
+    
+    return data_point
 
-    if data_point == True:
+def sample_id_counter(data_pt):
+    
+   sample_id = 1
+
+   if data_pt is not None:
         sample_id += 1
         
-    return data_point
+   return sample_id
             
-def write_data_tofile(data_point):
+def write_data_tofile(sample_id, data_point):
     
     log_file = data_file()
     with open(log_file, mode='a',newline='') as the_file:
         writer = csv.writer(the_file, dialect='excel')
-        writer.writerow(data_point)
+        writer.writerow(sample_id + data_point)
 
 # IV curve measurement
         
@@ -511,9 +515,10 @@ def open_circ():
     
     oc_vals =  get_input_values() # read open circuits levels
     oc_data_point = data_point(oc_vals) # create data point for open circuit measurement
-    voc = oc_data_point[3] # open circuit voltage measurement
+    voc = oc_data_point[2] # open circuit voltage measurement
     print('Open circuit voltage: ', voc)
-    write_data_tofile(oc_data_point) # write data to file
+    new_sample_id = [sample_id_counter(oc_data_point)]
+    write_data_tofile(new_sample_id, oc_data_point) # write data to file
     
     return voc
   
@@ -521,16 +526,17 @@ def iv_curve(voc):
     """Measure intermediate current voltage points"""
     
     set_mode(mode_cv) # set operation mode to CC
-    time.sleep(.1)
+    time.sleep(.250)
     volt_step = voc
     while volt_step > 0.5:
         set_CV_volts(volt_step)
         time.sleep(.1)
         curve_vals = get_input_values()
         curve_data_point = data_point(curve_vals)
-        print('voltage, current, power: ', curve_data_point[3], curve_data_point[4], curve_data_point[5])
-        write_data_tofile(curve_data_point)
-        new_volt_step = curve_data_point[3] - 0.5
+        print('voltage, current, power: ', curve_data_point[2], curve_data_point[3], curve_data_point[4])
+        new_sample_id = [sample_id_counter(curve_data_point)]
+        write_data_tofile(new_sample_id, curve_data_point)
+        new_volt_step = curve_data_point[2] - 1.0
         volt_step = new_volt_step
     pass
     
@@ -544,9 +550,10 @@ def short_circ():
     
     sc_vals = get_input_values()
     sc_data_point = data_point(sc_vals)
-    jsc = sc_data_point[4]
+    jsc = sc_data_point[3]
     print('Short circuit current: ', jsc)
-    write_data_tofile(sc_data_point)
+    new_sample_id = [sample_id_counter(sc_data_point)]
+    write_data_tofile(new_sample_id, sc_data_point)
 
     return jsc      
 
@@ -566,17 +573,15 @@ def sweep():
     set_enable_load(False) # turn input OFF
 
 def main():
+        
+    data_file()
     
-    data_file(log_file_postfix='LOAD')
-    
-#    if (serial.Serial.isOpen("COM3") == False): # check if serial port is already open
-    init_load() # establish PC-load serial connection
-    
+    init_load()
     time.sleep(.250)
     set_remote_control(True) # set remote control ON
     
     while True:
-        time.sleep(5)
+        time.sleep(900)
         sweep()
 
 #______________________________________________________________________________
